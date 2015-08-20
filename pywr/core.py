@@ -52,7 +52,7 @@ class Model(object):
         if solver is not None:
             # use specific solver
             try:
-                self.solver = SolverMeta.solvers[solver.lower()]
+                self.solver = SolverMeta.solvers[solver.lower()]()
             except KeyError:
                 raise KeyError('Unrecognised solver: {}'.format(solver))
         else:
