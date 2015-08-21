@@ -1,5 +1,7 @@
 
 from cpython cimport array
+from cpython.ref cimport PyObject
+from libc.stdlib cimport malloc, free
 import array
 
 from ..core import Input, Link, Output, Storage, Solver, PiecewiseLink, InputFromOtherDomain
@@ -14,56 +16,60 @@ cdef int NODE_TYPE_INPUT = 1
 cdef int NODE_TYPE_OUTPUT = 2
 
 
-cdef class CyNode:
-    cdef object parent
-    cdef int node_type
-    cdef public int index
-    # TODO This is not optimal because of glpk interfacing requiring
-    # a Python object so it can cope with None for unbounded.
-    cdef object min_flow
-    cdef object max_flow
-    cdef float cost
-    cdef float benefit
-    cdef float opt_flow
-    """
-    A very simple representation of a node in the model.
+cdef struct CyNode:
+    # A very simple representation of a node in the model.
 
-    The purpose of this class is to shadow the core.Node instances in the model
-    while solving. The general principle is that at the beginning of the timestep
-    the attributes of this node will be updated with those from the parent (if
-    required) once. All looping through nodes for updating the LP is then
-    undetaken using this class which can be more aggressively optimised.
+    # The purpose of this class is to shadow the core.Node instances in the model
+    # while solving. The general principle is that at the beginning of the timestep
+    # the attributes of this node will be updated with those from the parent (if
+    # required) once. All looping through nodes for updating the LP is then
+    # undetaken using this class which can be more aggressively optimised.
+    PyObject* parent
+    int node_type
+    int index
+
+    float min_flow
+    float max_flow
+    int has_max_flow
+    float cost
+    float benefit
+    float opt_flow
+
+cdef init_cynode(CyNode *self, object parent, int index):
     """
-    def __init__(self, parent):
-        self.parent = parent
-        if isinstance(parent, Link):
-            self.node_type = NODE_TYPE_LINK
-        elif isinstance(parent, Input):
-            self.node_type = NODE_TYPE_INPUT
-        elif isinstance(parent, Output):
-            self.node_type = NODE_TYPE_OUTPUT
-        else:
-            raise ValueError("Parent node type ({}) not understood.".format(parent.__class__))
-        self.max_flow = 0.0
-        self.min_flow = 0.0
-        self.cost = 0.0
-        self.benefit = 0.0
-        # For the result of the LP solve
-        self.opt_flow = 0.0
+    Init function for CyNode
+    """
+    self.parent = <PyObject*>parent
+    self.node_type = 0
+    if isinstance(parent, Link):
+        self.node_type = NODE_TYPE_LINK
+    elif isinstance(parent, Input):
+        self.node_type = NODE_TYPE_INPUT
+    elif isinstance(parent, Output):
+        self.node_type = NODE_TYPE_OUTPUT
+    else:
+        raise ValueError("Parent node type ({}) not understood.".format(parent.__class__))
+    self.max_flow = 0.0
+    self.has_max_flow = 0
+    self.min_flow = 0.0
+    self.cost = 0.0
+    self.benefit = 0.0
+    # For the result of the LP solve
+    self.opt_flow = 0.0
+    self.index = index
 
 
-cdef class CyStorage:
-    cdef object parent
-    cdef float min_volume
-    cdef float current_volume
-    cdef float max_volume
-    """
-    A very simple representation of a Storage node in the model
-    """
-    def __init__(self, parent):
-        self.parent = parent
+cdef struct CyStorage:
+    PyObject* parent
+    float min_volume
+    float current_volume
+    float max_volume
+
+cdef init_cystorage(CyStorage *self, object parent):
         if not isinstance(parent, Storage):
             raise ValueError("Parent node type ({}) not understood.".format(parent.__class__))
+        self.parent = <PyObject*>parent
+
         self.min_volume = 0.0
         self.current_volume = 0.0
         self.max_volume = 0.0
@@ -79,14 +85,26 @@ cdef class CyRoute:
         self.node_indices = array.array('i', indices)
 
 
-class SolverFastGLPK(Solver):
-    name = 'FastGLPK'
+cdef class CySolverFastGLPK:
+    cdef int nnodes, nstorage_nodes
+    cdef CyNode* nodes
+    cdef CyStorage* storage_nodes
+    cdef object lp, output_cross_domain_nodes
+    cdef dict input_nodes, output_nodes, intermediate_max_flow_constraints, storage_rows
+    cdef list routes, cross_domain_routes
+    cdef float[:] result
 
     def solve(self, model):
+        cdef CyNode* nodes
         cdef CyNode nd, ind, ond
+        cdef CyStorage* storage_nodes
         cdef CyStorage snd
         cdef CyRoute route, route2
-        cdef int inode
+        cdef int inode, isnode, iroute
+        cdef int *nnodes, *nstorage_nodes
+
+        nnodes = &self.nnodes
+        nstorage_nodes = &self.nstorage_nodes
 
         timestep = model.parameters['timestep']
         if isinstance(timestep, datetime.timedelta):
@@ -102,43 +120,69 @@ class SolverFastGLPK(Solver):
             lp.obj.maximize = True
             # Make a local Node or Storage instances for each node in the
             # model.
-            nodes = self.nodes = []
-            storage_nodes = self.storage_nodes = []
+
+            # Free any existing node arrays
+            if nodes:
+                free(nodes)
+            nnodes[0] = 0
+
+            if storage_nodes:
+                free(storage_nodes)
+            nstorage_nodes[0] = 0
+
             input_nodes = self.input_nodes = {}
             output_nodes = self.output_nodes = {}
 
+            py_nodes = model.nodes()
+
+            # Count number nodes required
+            for py_node in py_nodes:
+                if isinstance(py_node, Storage):
+                    nstorage_nodes[0] += 1
+                elif isinstance(py_node, PiecewiseLink):
+                    continue
+                else:
+                    nnodes[0] += 1
+
+            nodes = <CyNode*>malloc(nnodes[0]*sizeof(CyNode))
+            self.nodes = nodes
+            storage_nodes = <CyStorage*>malloc(nstorage_nodes[0]*sizeof(CyStorage))
+            self.storage_nodes = storage_nodes
+
             inode = 0
-            for py_node in model.nodes():
+            isnode = 0
+            for py_node in py_nodes:
                 if isinstance(py_node, Storage):
                     # Storage requires a special case
-                    snd = CyStorage(py_node)
-                    storage_nodes.append(snd)
-                    py_node._cy_node = snd
+                    init_cystorage(&storage_nodes[isnode], py_node)
+                    py_node._cy_node_index = isnode
+                    isnode += 1
                 elif isinstance(py_node, PiecewiseLink):
                     # PiecewiseLink is a dummy and shouldn't be involved in
                     # any routes, so it can be ignored.
                     continue
                 else:
                     # All other nodes are of type Node
-                    nd = CyNode(py_node)
-                    nodes.append(nd)
+                    init_cynode(&nodes[inode], py_node, inode)
+                    nd = nodes[inode]
                     # Make a reference to the 'solver' clone on the parent.
-                    py_node._cy_node = nd
-
+                    py_node._cy_node_index = inode
                     if nd.node_type == NODE_TYPE_INPUT:
-                        input_nodes[nd] = {'cols': [], 'col_idxs': []}
+                        input_nodes[inode] = {'cols': [], 'col_idxs': []}
                     if nd.node_type == NODE_TYPE_OUTPUT:
-                        output_nodes[nd] = {'cols': [], 'col_idxs': []}
-                    nd.index = inode
+                        output_nodes[inode] = {'cols': [], 'col_idxs': []}
+
                     inode += 1
 
 
             py_routes = model.find_all_routes(Input, Output, valid=(Link, Input, Output))
             # Swap core.Node for CyNode
             routes = self.routes = []
+            # Allocate space for results
+            self.result = array.array('f', [0.0 for i in range(len(py_routes))])
 
             for py_route in py_routes:
-                route = CyRoute([node._cy_node.index for node in py_route])
+                route = CyRoute([node._cy_node_index for node in py_route])
                 col_idx = lp.cols.add(1)
                 route.col = lp.cols[col_idx]
                 routes.append(route)
@@ -156,19 +200,20 @@ class SolverFastGLPK(Solver):
                 ind = nodes[route.node_indices[0]]
                 ond = nodes[route.node_indices[-1]]
 
-                input_nodes[ind]['cols'].append(col)
-                input_nodes[ind]['col_idxs'].append(col.index)
+                input_nodes[ind.index]['cols'].append(col)
+                input_nodes[ind.index]['col_idxs'].append(col.index)
 
-                output_nodes[ond]['cols'].append(col)
-                output_nodes[ond]['col_idxs'].append(col.index)
+                output_nodes[ond.index]['cols'].append(col)
+                output_nodes[ond.index]['col_idxs'].append(col.index)
 
                 # find constraints on intermediate nodes
-                intermediate_nodes = [nodes[inode] for inode in route.node_indices[1:-1]]
-                for nd in intermediate_nodes:
-                    if nd not in intermediate_max_flow_constraints:
+                intermediate_nodes = [inode for inode in route.node_indices[1:-1]]
+                for inode in intermediate_nodes:
+                    if inode not in intermediate_max_flow_constraints:
+                        nd = nodes[inode]
                         row_idx = lp.rows.add(1)
                         row = lp.rows[row_idx]
-                        intermediate_max_flow_constraints[nd] = row
+                        intermediate_max_flow_constraints[nd.index] = row
                         col_idxs = []
                         for route2 in routes:
                             if nd.index in route2.node_indices:
@@ -176,7 +221,7 @@ class SolverFastGLPK(Solver):
                         row.matrix = [(idx, 1.0) for idx in col_idxs]
 
             # initialise the structure (only) for the input constraint
-            for ind, info in input_nodes.items():
+            for inode, info in input_nodes.items():
                 if len(info['col_idxs']) > 0:
                     row_idx = lp.rows.add(1)
                     row = lp.rows[row_idx]
@@ -190,11 +235,13 @@ class SolverFastGLPK(Solver):
             # translate to a dictionary with the Ouput node as a key
             output_cross_domain_nodes = self.output_cross_domain_nodes = defaultdict(list)
             for output_node, input_node in cross_domain_routes:
-                output_cross_domain_nodes[output_node._cy_node].append(input_node._cy_node)
+                ond = nodes[output_node._cy_node_index]
+                ind = nodes[input_node._cy_node_index]
+                output_cross_domain_nodes[ond.index].append(ind.index)
 
-            for ond, info in output_nodes.items():
+            for inode, info in output_nodes.items():
                 # add a column for each output
-
+                ond = nodes[inode]
                 col_idx = lp.cols.add(1)
                 col = lp.cols[col_idx]
                 info['output_col'] = col
@@ -210,16 +257,16 @@ class SolverFastGLPK(Solver):
 
                 # Deal with exports from this output node to other input nodes
                 info['cross_domain_row'] = None
-                cross_domain_nodes = output_cross_domain_nodes[ond]
+                cross_domain_nodes = output_cross_domain_nodes[ond.index]
                 if len(cross_domain_nodes) > 0:
                     row_idx = lp.rows.add(1)
                     row = lp.rows[row_idx]
                     row.bounds = 0, 0
                     input_matrix = []
-                    for ind in cross_domain_nodes:
-                        input_info = input_nodes[ind]
+                    for inode in cross_domain_nodes:
+                        input_info = input_nodes[inode]
                         # TODO Make this vary with timestep
-                        coef = ind.parent.properties['conversion_factor'].value()
+                        coef = (<object>ind.parent).properties['conversion_factor'].value()
                         input_matrix.extend([(idx, 1/coef) for idx in input_info['col_idxs']])
                     output_matrix = [(col_idx, -1.0)]
                     row.matrix = input_matrix + output_matrix
@@ -227,10 +274,11 @@ class SolverFastGLPK(Solver):
 
             storage_rows = self.storage_rows = {}
             # Setup Storage node constraints
-            for snd in storage_nodes:
+            for inode in range(nstorage_nodes[0]):
+                snd = storage_nodes[inode]
 
-                input_info = input_nodes[snd.parent.input._cy_node]
-                output_info = output_nodes[snd.parent.output._cy_node]
+                input_info = input_nodes[(<object>snd.parent).input._cy_node_index]
+                output_info = output_nodes[(<object>snd.parent).output._cy_node_index]
                 # mass balance between input and output
                 row_idx = lp.rows.add(1)
                 row = lp.rows[row_idx]
@@ -238,7 +286,7 @@ class SolverFastGLPK(Solver):
                 input_matrix = [(idx, -1.0) for idx in input_info['col_idxs']]
                 output_matrix = [(output_info['output_col'].index, 1.0)]
                 row.matrix = input_matrix + output_matrix
-                storage_rows[snd] = row
+                storage_rows[inode] = row
 
             # TODO add min flow requirement
             """
@@ -262,29 +310,36 @@ class SolverFastGLPK(Solver):
             #blenders = self.blenders
             #groups = self.groups
 
-        timestamp = self.timestamp = model.timestamp
+        timestamp = model.timestamp
 
-        # TODO: move outside the solver.
-        for node in model.nodes():
-            node.before()
+        for inode in range(nnodes[0]):
+            parent = <object>nodes[inode].parent
 
-        for nd in nodes:
-            nd.max_flow = nd.parent.properties['max_flow'].value(timestamp)
             try:
-                nd.min_flow = nd.parent.properties['min_flow'].value(timestamp)
-            except KeyError:
-                nd.min_flow = 0.0
-            nd.cost = nd.parent.properties['cost'].value(timestamp)
-            try:
-                nd.benefit = nd.parent.properties['benefit'].value(timestamp)
-            except KeyError:
-                nd.benefit = 0.0
-            nd.opt_flow = 0.0
-            #print nd.parent.name, nd.min_flow, nd.max_flow
+                nodes[inode].max_flow = parent.properties['max_flow'].value(timestamp)
+                nodes[inode].has_max_flow = 1
+            except TypeError:
+                # Float not found. Assume max_flow is unbounded
+                nodes[inode].has_max_flow = 0
+                nodes[inode].max_flow = 0.0
 
-        for snd in storage_nodes:
-            snd.current_volume = snd.parent.properties['current_volume'].value(timestamp)
-            snd.max_volume = snd.parent.properties['max_volume'].value(timestamp)
+            try:
+                nodes[inode].min_flow = parent.properties['min_flow'].value(timestamp)
+            except KeyError:
+                nodes[inode].min_flow = 0.0
+
+            nodes[inode].cost = parent.properties['cost'].value(timestamp)
+            try:
+                nodes[inode].benefit = parent.properties['benefit'].value(timestamp)
+            except KeyError:
+                nodes[inode].benefit = 0.0
+            nodes[inode].opt_flow = 0.0
+
+        for inode in range(nstorage_nodes[0]):
+            parent = <object>storage_nodes[inode].parent
+
+            storage_nodes[inode].current_volume = parent.properties['current_volume'].value(timestamp)
+            storage_nodes[inode].max_volume = parent.properties['max_volume'].value(timestamp)
 
         # the cost of a route is equal to the sum of the route's node's costs
         costs = []
@@ -292,22 +347,26 @@ class SolverFastGLPK(Solver):
         for route in routes:
             cost = 0.0
             for inode in route.node_indices[0:-1]:
-                nd = nodes[inode]
-                cost += nd.cost
+                cost += nodes[inode].cost
             lp.obj[route.col.index] = -cost
 
         # there is a benefit for inputting water to outputs
-        for ond, info in output_nodes.items():
+        for inode, info in output_nodes.items():
             col = info['output_col']
-            cost = ond.benefit
+            cost = nodes[inode].benefit
             lp.obj[col.index] = cost
 
         # input is limited by a minimum and maximum flow, and any licenses
-        for ind, info in input_nodes.items():
+        for inode, info in input_nodes.items():
             if len(info['col_idxs']) > 0:
+                ind = nodes[inode]
                 row = info['input_constraint']
-
-                max_flow = ind.max_flow
+                # This is an inefficiency with requiring a Python None for
+                # unbounded in the glpk interface
+                if ind.has_max_flow == 1:
+                    max_flow = ind.max_flow
+                else:
+                    max_flow = None
                 """
                 max_flow_license = inf
                 if input_node.licenses is not None:
@@ -323,20 +382,30 @@ class SolverFastGLPK(Solver):
 
         # outputs require a water between a min and maximium flow
         total_water_outputed = defaultdict(lambda: 0.0)
-        for ond, info in output_nodes.items():
+        for inode, info in output_nodes.items():
+            ond = nodes[inode]
             # update output for the current timestep
             col = info['output_col']
-            max_flow = ond.max_flow
+            if ond.has_max_flow == 1:
+                max_flow = ond.max_flow
+            else:
+                max_flow = None
             min_flow = ond.min_flow
             col.bounds = min_flow, max_flow
-            total_water_outputed[ond.parent.domain] += min_flow
+            total_water_outputed[(<object>ond.parent).domain] += <object>min_flow
 
         # intermediate node max flow constraints
-        for nd, row in intermediate_max_flow_constraints.items():
-            row.bounds = 0, nd.max_flow
+        for inode, row in intermediate_max_flow_constraints.items():
+            nd = nodes[inode]
+            if nd.has_max_flow == 1:
+                max_flow = nd.max_flow
+            else:
+                max_flow = None
+            row.bounds = 0, max_flow
 
         # storage limits
-        for snd, row in storage_rows.items():
+        for inode, row in storage_rows.items():
+            snd = storage_nodes[inode]
             current_volume = snd.current_volume
             max_volume = snd.max_volume
             # Change in storage limits
@@ -389,21 +458,23 @@ class SolverFastGLPK(Solver):
         status = 'optimal'
 
         # retrieve the results
-        result = [round(route.col.primal, 3) for route in routes]
+        #result = [round(route.col.primal, 3) for route in routes]
+        #result = array.array('f', indices)
         total_water_supplied = defaultdict(lambda: 0.0)
-        for route in routes:
+        for iroute, route in enumerate(routes):
+            self.result[iroute] = round(route.col.primal, 3)
             nd = nodes[route.node_indices[-1]]
-            total_water_supplied[nd.parent.domain] += round(route.col.primal, 3)
+            total_water_supplied[(<object>nd.parent).domain] += round(route.col.primal, 3)
 
         # commit the volume of water actually supplied
-        for n, route in enumerate(routes):
+        for iroute, route in enumerate(routes):
             for inode in route.node_indices:
-                nd = nodes[inode]
-                nd.opt_flow += result[n]
+                nodes[inode].opt_flow += self.result[iroute]
 
-        for nd in nodes:
-            #print nd.parent.name, nd.opt_flow
-            nd.parent.commit(nd.opt_flow)
+        for inode in range(nnodes[0]):
+            nd = nodes[inode]
+            #print (<object>nd.parent).name, nd.opt_flow
+            (<object>nd.parent).commit(nd.opt_flow)
 
         # calculate the total amount of water transferred via each node/link
         volumes_links = {}
@@ -435,3 +506,12 @@ class SolverFastGLPK(Solver):
                 del(volumes_nodes[k])
         """
         return status, total_water_outputed, total_water_supplied, volumes_links, volumes_nodes
+
+class SolverFastGLPK(Solver):
+    name = 'FastGLPK'
+
+    def __init__(self, ):
+        self.cy_solver = CySolverFastGLPK()
+
+    def solve(self, model):
+        return self.cy_solver.solve(model)
