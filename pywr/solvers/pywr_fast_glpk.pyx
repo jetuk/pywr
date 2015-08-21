@@ -1,4 +1,4 @@
-
+# cython: profile=False
 from cpython cimport array
 from cpython.ref cimport PyObject
 from libc.stdlib cimport malloc, free
@@ -100,7 +100,7 @@ cdef class CySolverFastGLPK:
         cdef CyStorage* storage_nodes
         cdef CyStorage snd
         cdef CyRoute route, route2
-        cdef int inode, isnode, iroute
+        cdef int inode, isnode, iroute, i
         cdef int *nnodes, *nstorage_nodes
 
         nnodes = &self.nnodes
@@ -346,8 +346,8 @@ cdef class CySolverFastGLPK:
         cdef float cost
         for route in routes:
             cost = 0.0
-            for inode in route.node_indices[0:-1]:
-                cost += nodes[inode].cost
+            for i in range(route.node_indices.shape[0]):
+                cost += nodes[route.node_indices[i]].cost
             lp.obj[route.col.index] = -cost
 
         # there is a benefit for inputting water to outputs
@@ -468,7 +468,8 @@ cdef class CySolverFastGLPK:
 
         # commit the volume of water actually supplied
         for iroute, route in enumerate(routes):
-            for inode in route.node_indices:
+            for i in range(route.node_indices.shape[0]):
+                inode = route.node_indices[i]
                 nodes[inode].opt_flow += self.result[iroute]
 
         for inode in range(nnodes[0]):
