@@ -1,3 +1,4 @@
+
 """
 This module contains a Solver baseclass and several implemented subclasses.
 
@@ -7,9 +8,7 @@ allocation problem every time step.
 Currently there are only linear programme based solvers using,
     - GLPK
     - LPSolve55
-
 """
-
 solver_registry = []
 
 class Solver(object):
@@ -72,3 +71,4 @@ else:
         def solve(self, model):
             return self._cy_solver.solve(model)
     solver_registry.append(CythonLPSolveSolver)
+from .cllp import PyCLLPSolver
