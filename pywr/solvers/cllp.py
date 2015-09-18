@@ -1,4 +1,4 @@
-from ..core import Solver
+from . import Solver
 from pycllp.lp import StandardLP
 from pycllp.solvers import solver_registry
 from pywr.core import BaseInput, BaseOutput, BaseLink
@@ -160,6 +160,7 @@ class PyCLLPSolver(Solver):
 
         # Now expand the constraints and objective function to multiple
         lp.set_num_problems(len(model.scenarios.combinations))
+        self.combinations = np.array([s for s in model.scenarios.combinations])
 
     def solve(self, model):
         lp = self.lp
@@ -168,43 +169,45 @@ class PyCLLPSolver(Solver):
         supplys = self.supplys
         demands = self.demands
         storages = self.storages
+        combinations = self.combinations
 
-        for scenario_id, scenario_indices in enumerate(model.scenarios.combinations):
-            # update route properties
-            for col, route in enumerate(routes):
-                cost = 0.0
-                for node in route:
-                    cost += node.get_cost(timestep, scenario_indices)
-                lp.set_objective(self.idx_col_routes+col, -cost)
+        # update route properties
+        for col, route in enumerate(routes):
+            cost = np.zeros(combinations.shape[0])
+            for node in route:
+                cost += node.get_all_cost(timestep, combinations)
+            lp.set_objective(self.idx_col_routes+col, -cost)
 
-            # update supply properties
-            for col, supply in enumerate(supplys):
-                min_flow = inf_to_dbl_max(supply.get_min_flow(timestep, scenario_indices))
-                max_flow = inf_to_dbl_max(supply.get_max_flow(timestep, scenario_indices))
-                lp.set_bound(self.idx_row_supplys+col*2, max_flow)
-                lp.set_bound(self.idx_row_supplys+col*2+1, -min_flow)
+        # update supply properties
+        for col, supply in enumerate(supplys):
+            min_flow = np.array(supply.get_all_min_flow(timestep, combinations))
+            max_flow = np.array(supply.get_all_max_flow(timestep, combinations))
+            lp.set_bound(self.idx_row_supplys+col*2, max_flow)
+            lp.set_bound(self.idx_row_supplys+col*2+1, -min_flow)
 
-            # update demand properties
-            for col, demand in enumerate(demands):
-                min_flow = inf_to_dbl_max(demand.get_min_flow(timestep, scenario_indices))
-                max_flow = inf_to_dbl_max(demand.get_max_flow(timestep, scenario_indices))
-                if min_flow < 0.0:
-                    raise ValueError("Minimum flow less than zero not supported by this solver.")
-                cost = demand.get_cost(timestep, scenario_indices)
-                lp.set_bound(self.idx_row_demands+col*4+2, max_flow)
-                lp.set_bound(self.idx_row_demands+col*4+3, -min_flow)
-                lp.set_objective(self.idx_col_demands+col, -cost)
+        # update demand properties
+        for col, demand in enumerate(demands):
+            min_flow = np.array(demand.get_all_min_flow(timestep, combinations))
+            max_flow = np.array(demand.get_all_max_flow(timestep, combinations))
+            if np.any(min_flow < 0.0):
+                raise ValueError("Minimum flow less than zero not supported by this solver.")
+            cost = np.array(demand.get_all_cost(timestep, combinations))
+            lp.set_bound(self.idx_row_demands+col*4+2, max_flow)
+            lp.set_bound(self.idx_row_demands+col*4+3, -min_flow)
+            lp.set_objective(self.idx_col_demands+col, -cost)
 
-            # update storage node constraint
-            for col, storage in enumerate(storages):
-                max_volume = storage.get_max_volume(timestep, scenario_indices)
-                avail_volume = max(storage._volume[scenario_id] - storage.get_min_volume(timestep, scenario_indices), 0.0)
-                # change in storage cannot be more than the current volume or
-                # result in maximum volume being exceeded
-                lb = -avail_volume/timestep.days
-                ub = (max_volume-storage._volume[scenario_id])/timestep.days
-                lp.set_bound(self.idx_row_storages+col*2, ub)
-                lp.set_bound(self.idx_row_storages+col*2+1, -lb)
+        # update storage node constraint
+        for col, storage in enumerate(storages):
+            volume = np.array(storage._volume)
+            max_volume = np.array(storage.get_all_max_volume(timestep, combinations))
+            avail_volume = volume - np.array(storage.get_all_min_volume(timestep, combinations))
+            avail_volume[avail_volume < 0.0] = 0.0
+            # change in storage cannot be more than the current volume or
+            # result in maximum volume being exceeded
+            lb = -avail_volume/timestep.days
+            ub = (max_volume-volume)/timestep.days
+            lp.set_bound(self.idx_row_storages+col*2, ub)
+            lp.set_bound(self.idx_row_storages+col*2+1, -lb)
 
 
         # Initialise the interior point solver.
@@ -217,14 +220,16 @@ class PyCLLPSolver(Solver):
         x = self._solver.x
         status = self._solver.status
 
-        if status != 0:
+        if np.any(status != 0):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
 
-        route_flow = np.round(x[0, self.idx_col_routes:self.idx_col_routes+len(routes)], 5)
+        route_flow = x[:, self.idx_col_routes:self.idx_col_routes+len(routes)]
+        print(route_flow.shape, lp.nproblems)
         change_in_storage = []
 
         result = {}
 
-        for route, flow in zip(routes, route_flow):
+        for i, route in enumerate(routes):
+            flow = route_flow[:, i]
             for node in route:
-                node.commit(scenario_id, flow)
+                node.commit_all(flow)

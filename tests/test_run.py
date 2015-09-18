@@ -16,7 +16,6 @@ import pywr.parameters.licenses
 import pywr.domains.river
 
 from helpers import load_model
-
 import pywr.parameters
 
 

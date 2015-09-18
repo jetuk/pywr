@@ -26,7 +26,7 @@ def assert_model(model, expected_node_results):
     for node in model.nodes:
         if node.name in expected_node_results:
             if isinstance(node, pywr.core.BaseNode):
-                assert_allclose(expected_node_results[node.name], node.flow, atol=1e-7)
+                assert_allclose(expected_node_results[node.name], node.flow, rtol=1e-5, atol=1e-7)
             elif isinstance(node, pywr.core.Storage):
                 assert_allclose(expected_node_results[node.name], node.volume, atol=1e-7)
 

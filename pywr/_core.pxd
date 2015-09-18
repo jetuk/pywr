@@ -44,6 +44,7 @@ cdef class AbstractNode:
     cdef public basestring comment
 
     cdef Parameter _cost_param
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations)
 
     cpdef setup(self, model)
     cpdef reset(self)
@@ -65,7 +66,9 @@ cdef class Node(AbstractNode):
     cdef Parameter _conversion_factor_param
     cpdef double get_cost(self, Timestep ts, ScenarioIndex scenario_index) except? -1
     cpdef double get_min_flow(self, Timestep ts, ScenarioIndex scenario_index) except? -1
+    cpdef double[:] get_all_min_flow(self, Timestep ts, int[:, :] combinations)
     cpdef double get_max_flow(self, Timestep ts, ScenarioIndex scenario_index) except? -1
+    cpdef double[:] get_all_max_flow(self, Timestep ts, int[:, :] combinations)
     cpdef double get_conversion_factor(self) except? -1
     cdef set_parameters(self, Timestep ts, ScenarioIndex scenario_index)
 
@@ -94,7 +97,9 @@ cdef class Storage(AbstractStorage):
     cpdef _reset_storage_only(self)
     cpdef double get_cost(self, Timestep ts, ScenarioIndex scenario_index) except? -1
     cpdef double get_min_volume(self, Timestep ts, ScenarioIndex scenario_index) except? -1
+    cpdef double[:] get_all_min_volume(self, Timestep ts, int[:, :] combinations)
     cpdef double get_max_volume(self, Timestep ts, ScenarioIndex scenario_index) except? -1
+    cpdef double[:] get_all_max_volume(self, Timestep ts, int[:, :] combinations)
     cpdef double get_level(self, Timestep ts, ScenarioIndex scenario_index) except? -1
 
 cdef class AggregatedStorage(AbstractStorage):
