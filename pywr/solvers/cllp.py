@@ -174,7 +174,7 @@ class PyCLLPSolver(Solver):
         # update route properties
         for col, route in enumerate(routes):
             cost = np.zeros(combinations.shape[0])
-            for node in route:
+            for node in route[:-1]:
                 cost += node.get_all_cost(timestep, combinations)
             lp.set_objective(self.idx_col_routes+col, -cost)
 
@@ -224,7 +224,6 @@ class PyCLLPSolver(Solver):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
 
         route_flow = x[:, self.idx_col_routes:self.idx_col_routes+len(routes)]
-        print(route_flow.shape, lp.nproblems)
         change_in_storage = []
 
         result = {}

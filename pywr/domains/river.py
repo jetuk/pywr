@@ -1,7 +1,7 @@
-
 from pywr.nodes import Node, Domain, Input, Output, Link, Storage, PiecewiseLink, MultiSplitLink
 from pywr.parameters import pop_kwarg_parameter, ConstantParameter, BaseParameter, load_parameter
 from pywr.parameters.control_curves import ControlCurveParameter
+import numpy as np
 
 DEFAULT_RIVER_DOMAIN = Domain(name='river', color='#33CCFF')
 
@@ -92,6 +92,9 @@ class Reservoir(RiverDomainMixin, Storage):
             # reinstate the given cost parameter to pass to the parent constructors
             kwargs['cost'] = cost
         super(Reservoir, self).__init__(*args, **kwargs)
+
+    def get_all_cost(self, ts, combinations):
+        return np.array([self.get_cost(ts, combinations[i, :]) for i in range(combinations.shape[0])])
 
 
 class River(RiverDomainMixin, Link):
