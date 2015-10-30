@@ -6,21 +6,16 @@ from pywr._core import *
 import numpy as np
 
 inf = np.inf
-DBL_MAX = np.finfo(np.float32).max
-DBL_MAX = np.inf
+DBL_MAX = 99999.0
 
 def dbl_max_to_inf(a):
-    if a == DBL_MAX:
-        return inf
-    elif a == -DBL_MAX:
-        return -inf
+    a[np.where(a==DBL_MAX)] = np.inf
+    a[np.where(a==-DBL_MAX)] = -np.inf
     return a
 
 def inf_to_dbl_max(a):
-    if a == inf:
-        return DBL_MAX
-    elif a == -inf:
-        return -DBL_MAX
+    a[np.where(a>DBL_MAX)] = DBL_MAX
+    a[np.where(a<-DBL_MAX)] = -DBL_MAX
     return a
 
 class PyCLLPSolver(Solver):
@@ -37,32 +32,25 @@ class PyCLLPSolver(Solver):
         # TODO make this user configurable
         self._solver = solver_registry['dense_path_following']()
 
-
         routes = model.find_all_routes(BaseInput, BaseOutput, valid=(BaseLink, BaseInput, BaseOutput))
         # Find cross-domain routes
         cross_domain_routes = model.find_all_routes(BaseOutput, BaseInput, max_length=2, domain_match='different')
 
-        supplys = []
-        demands = []
+        non_storages = []
         storages = []
         for some_node in model.nodes():
-            if isinstance(some_node, (BaseInput, BaseLink)):
-                supplys.append(some_node)
-            if isinstance(some_node, BaseOutput):
-                demands.append(some_node)
-            if isinstance(some_node, Storage):
+            if isinstance(some_node, (BaseInput, BaseLink, BaseOutput)):
+                non_storages.append(some_node)
+            elif isinstance(some_node, Storage):
                 storages.append(some_node)
 
         assert(routes)
-        assert(supplys)
-        assert(demands)
+        assert(non_storages)
 
         # Create new blank problem
         self.lp = lp = StandardLP()
         # first column id for routes
         self.idx_col_routes = 0
-        # first column id for demands
-        self.idx_col_demands = len(routes)
 
         # create a lookup for the cross-domain routes.
         cross_domain_cols = {}
@@ -80,57 +68,46 @@ class PyCLLPSolver(Solver):
                 cross_domain_cols[demand] = supply_cols
 
         # constrain supply minimum and maximum flow
-        self.idx_row_supplys = lp.nrows
-        for col, supply in enumerate(supplys):
-            # TODO is this a bit hackish??
-            if isinstance(supply, BaseInput):
-                cols = [n for n, route in enumerate(routes) if route[0] is supply]
+        self.idx_row_non_storages = np.empty(len(non_storages), dtype=np.int)
+        cross_domain_col = 0
+        for row, some_node in enumerate(non_storages):
+            # Differentiate betwen the node type.
+            # Input & Output only apply their flow constraints when they
+            # are the first and last node on the route respectively.
+            if isinstance(some_node, BaseInput):
+                cols = [n for n, route in enumerate(routes) if route[0] is some_node]
+            elif isinstance(some_node, BaseOutput):
+                cols = [n for n, route in enumerate(routes) if route[-1] is some_node]
             else:
-                cols = [n for n, route in enumerate(routes) if supply in route]
+                # Other nodes apply their flow constraints to all routes passing through them
+                cols = [n for n, route in enumerate(routes) if some_node in route]
+
+            if len(cols) == 0:
+                # Mark this node as having no row entries
+                self.idx_row_non_storages[row] = -1
+                continue
+            # First row for this node
+            self.idx_row_non_storages[row] = lp.nrows
             ind = np.zeros(len(cols), dtype=np.int)
             val = np.zeros(len(cols), dtype=np.float64)
             for n, c in enumerate(cols):
                 ind[n] = c
                 val[n] = 1
-            lp.add_row(ind, val, np.inf)
+
+            lp.add_row(ind, val, DBL_MAX)
             lp.add_row(ind, -val, 0.0)
-
-        # link supply and demand variables
-        self.idx_row_demands = lp.nrows
-        for col, demand in enumerate(demands):
-            cols = [n for n, route in enumerate(routes) if route[-1] is demand]
-            ind = np.zeros(len(cols)+1, dtype=np.int)
-            val = np.zeros(len(cols)+1, dtype=np.float64)
-            for n, c in enumerate(cols):
-                ind[n] = c
-                val[n] = 1
-            ind[len(cols)] = self.idx_col_demands+col
-            val[len(cols)] = -1
-            # This constraint is added twice to enforce it as an equality
-            lp.add_row(ind, val, 0.0)
-            lp.add_row(ind, -val, 0.0)
-            # Now add additional constraints for demand bounds
-            # The standard form of an LP enforces x >= 0, but this
-            # potentially needs constraining
-            lp.add_row([self.idx_col_demands+col], [1.0], np.inf)
-            lp.add_row([self.idx_col_demands+col], [-1.0], 0.0)
-
-
-        if len(cross_domain_cols) > 0:
-            self.idx_row_cross_domain = lp.nrows
-        cross_domain_col = 0
-        for col, demand in enumerate(demands):
             # Add constraint for cross-domain routes
             # i.e. those from a demand to a supply
-            if demand in cross_domain_cols:
-                col_vals = cross_domain_cols[demand]
-                ind = np.zeros(len(col_vals)+1, dtype=np.int)
-                val = np.zeros(len(col_vals)+1, dtype=np.float64)
-                for n, (c, v) in enumerate(col_vals):
+            if some_node in cross_domain_cols:
+                col_vals = cross_domain_cols[some_node]
+                ind = np.zeros(len(col_vals)+len(cols), dtype=np.int)
+                val = np.zeros(len(col_vals)+len(cols), dtype=np.float64)
+                for n, c in enumerate(cols):
                     ind[n] = c
-                    val[n] = 1./v
-                ind[len(col_vals)] = self.idx_col_demands+col
-                val[len(col_vals)] = -1
+                    val[n] = -1
+                for n, (c, v) in enumerate(col_vals):
+                    ind[n+len(cols)] = c
+                    val[n+len(cols)] = 1./v
                 lp.add_row(ind, val, 0.0)
                 lp.add_row(ind, -val, 0.0)
                 cross_domain_col += 1
@@ -139,12 +116,12 @@ class PyCLLPSolver(Solver):
         if len(storages):
             self.idx_row_storages = lp.nrows
         for col, storage in enumerate(storages):
-            cols_output = [n for n, demand in enumerate(demands) if demand in storage.outputs]
+            cols_output = [n for n, route in enumerate(routes) if route[-1] in storage.outputs]
             cols_input = [n for n, route in enumerate(routes) if route[0] in storage.inputs]
             ind = np.zeros(len(cols_output)+len(cols_input), dtype=np.int)
             val = np.zeros(len(cols_output)+len(cols_input), dtype=np.float64)
             for n, c in enumerate(cols_output):
-                ind[n] = self.idx_col_demands+c
+                ind[n] = self.idx_col_routes+c
                 val[n] = 1
             for n, c in enumerate(cols_input):
                 ind[len(cols_output)+n] = self.idx_col_routes+c
@@ -154,8 +131,7 @@ class PyCLLPSolver(Solver):
             lp.add_row(ind, -val, 0.0)
 
         self.routes = routes
-        self.supplys = supplys
-        self.demands = demands
+        self.non_storages = non_storages
         self.storages = storages
 
         # Now expand the constraints and objective function to multiple
@@ -166,35 +142,29 @@ class PyCLLPSolver(Solver):
         lp = self.lp
         timestep = model.timestep
         routes = self.routes
-        supplys = self.supplys
-        demands = self.demands
+        non_storages = self.non_storages
         storages = self.storages
         combinations = self.combinations
 
         # update route properties
         for col, route in enumerate(routes):
-            cost = np.zeros(combinations.shape[0])
-            for node in route[:-1]:
-                cost += node.get_all_cost(timestep, combinations)
+            cost = np.array(route[0].get_all_cost(timestep, combinations))
+            for node in route[1:-1]:
+                if isinstance(node, BaseLink):
+                    cost += np.array(node.get_all_cost(timestep, combinations))
+            cost += np.array(route[-1].get_all_cost(timestep, combinations))
             lp.set_objective(self.idx_col_routes+col, -cost)
 
-        # update supply properties
-        for col, supply in enumerate(supplys):
-            min_flow = np.array(supply.get_all_min_flow(timestep, combinations))
-            max_flow = np.array(supply.get_all_max_flow(timestep, combinations))
-            lp.set_bound(self.idx_row_supplys+col*2, max_flow)
-            lp.set_bound(self.idx_row_supplys+col*2+1, -min_flow)
+        # update non-storage properties
+        for i, node in enumerate(non_storages):
+            row = self.idx_row_non_storages[i]
+            if row == -1:
+                continue
+            min_flow = inf_to_dbl_max(np.array(node.get_all_min_flow(timestep, combinations)))
+            max_flow = inf_to_dbl_max(np.array(node.get_all_max_flow(timestep, combinations)))
 
-        # update demand properties
-        for col, demand in enumerate(demands):
-            min_flow = np.array(demand.get_all_min_flow(timestep, combinations))
-            max_flow = np.array(demand.get_all_max_flow(timestep, combinations))
-            if np.any(min_flow < 0.0):
-                raise ValueError("Minimum flow less than zero not supported by this solver.")
-            cost = np.array(demand.get_all_cost(timestep, combinations))
-            lp.set_bound(self.idx_row_demands+col*4+2, max_flow)
-            lp.set_bound(self.idx_row_demands+col*4+3, -min_flow)
-            lp.set_objective(self.idx_col_demands+col, -cost)
+            lp.set_bound(row, max_flow)
+            lp.set_bound(row+1, -min_flow)
 
         # update storage node constraint
         for col, storage in enumerate(storages):
@@ -211,24 +181,24 @@ class PyCLLPSolver(Solver):
 
 
         # Initialise the interior point solver.
-        # remove constraints with infinite bounds
-        # this is to improve numerical stability, but is potentially
-        # a huge bottleneck.
-        ublp = lp.remove_unbounded()
-        ublp.init(self._solver)
-        ublp.solve(self._solver, verbose=0)
-        x = self._solver.x
+        lp.init(self._solver)
+        # Solve the problem
+        lp.solve(self._solver, verbose=0)
+        route_flow = self._solver.x
         status = self._solver.status
 
         if np.any(status != 0):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
 
-        route_flow = x[:, self.idx_col_routes:self.idx_col_routes+len(routes)]
         change_in_storage = []
 
         result = {}
 
         for i, route in enumerate(routes):
             flow = route_flow[:, i]
-            for node in route:
-                node.commit_all(flow)
+            # TODO make this cleaner.
+            route[0].commit_all(flow)
+            route[-1].commit_all(flow)
+            for node in route[1:-1]:
+                if isinstance(node, BaseLink):
+                    node.commit_all(flow)

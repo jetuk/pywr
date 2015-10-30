@@ -254,8 +254,9 @@ def test_dirty_model(solver):
     supply2 = Input(model, 'supply2')
 
     # run the model, clean
-    result = model.step()
-    assert(not model.dirty)
+    # TODO this should be invalid as supply2 is isolated.
+    #result = model.step()
+    #assert(not model.dirty)
 
     # add a new connection, dirty
     supply2.connect(demand1)

@@ -9,6 +9,11 @@ import pywr.core
 from pywr.core import Model, Input, Output, Catchment
 from pywr.parameters import MonthlyProfileParameter
 from pywr.domains import river
+<<<<<<< master
+=======
+import datetime
+import numpy as np
+>>>>>>> HEAD~14
 from numpy.testing import assert_allclose
 import pytest
 
@@ -166,25 +171,26 @@ def test_control_curve(solver):
     model.step()
     # Reservoir is currently above control curve. 2 should be taken from the
     # reservoir
-    assert(reservoir.volume == 8)
-    assert(demand.flow == 10)
+    assert_allclose(reservoir.volume, 8)
+    assert_allclose(demand.flow, 10)
     # Reservoir is still at (therefore above) control curve. So 2 is still taken
     model.step()
-    assert(reservoir.volume == 6)
-    assert(demand.flow == 10)
+    assert_allclose(reservoir.volume, 6)
+    assert_allclose(demand.flow, 10)
     # Reservoir now below curve. Better to retain volume and divert some of the
     # inflow
     model.step()
-    assert(reservoir.volume == 8)
-    assert(demand.flow == 6)
+    assert_allclose(reservoir.volume, 8)
+    assert_allclose(demand.flow, 6)
     # Set the above_curve_cost function to keep filling
     from pywr.parameters.control_curves import ControlCurveParameter
     # We know what we're doing with the control_curve Parameter so unset its parent before overriding
     # the cost parameter.
     reservoir.cost = ControlCurveParameter(reservoir, control_curve, [-20.0, -20.0])
     model.step()
-    assert(reservoir.volume == 10)
-    assert(demand.flow == 6)
+
+    assert_allclose(reservoir.volume, 10)
+    assert_allclose(demand.flow, 6)
 
 def test_catchment_many_successors(solver):
     """Test if node with fixed flow can have multiple successors. See #225"""
@@ -201,3 +207,4 @@ def test_catchment_many_successors(solver):
     assert_allclose(out1.flow, 10)
     assert_allclose(out2.flow, 15)
     assert_allclose(out3.flow, 75)
+
