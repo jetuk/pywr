@@ -419,6 +419,16 @@ cdef class Node(AbstractNode):
                 self._max_flow_param = None
                 self._max_flow = value
 
+    property is_max_flow_unbounded:
+        """ Returns True if max_flow is inf (i.e. unbounded).
+
+        False is returned if any Parameter is set.
+        """
+        def __get__(self):
+            if self._max_flow_param is None:
+                return self._max_flow == inf
+            return False
+
     cpdef double get_max_flow(self, Timestep ts, ScenarioIndex scenario_index) except? -1:
         """Get the maximum flow at a given timestep
         """

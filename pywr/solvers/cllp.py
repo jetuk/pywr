@@ -30,7 +30,7 @@ class PyCLLPSolver(Solver):
     def setup(self, model):
         # This is the interior point method to use as provided by pycllp
         # TODO make this user configurable
-        self._solver = solver_registry['dense_path_following']()
+        self._solver = solver_registry['cl_dense_primal_normal']()
 
         routes = model.find_all_routes(BaseInput, BaseOutput, valid=(BaseLink, BaseInput, BaseOutput))
         # Find cross-domain routes
@@ -68,7 +68,8 @@ class PyCLLPSolver(Solver):
                 cross_domain_cols[demand] = supply_cols
 
         # constrain supply minimum and maximum flow
-        self.idx_row_non_storages = np.empty(len(non_storages), dtype=np.int)
+        self.idx_row_non_storages_upper = np.empty(len(non_storages), dtype=np.int)
+        self.idx_row_non_storages_lower = np.empty(len(non_storages), dtype=np.int)
         cross_domain_col = 0
         for row, some_node in enumerate(non_storages):
             # Differentiate betwen the node type.
@@ -84,18 +85,25 @@ class PyCLLPSolver(Solver):
 
             if len(cols) == 0:
                 # Mark this node as having no row entries
-                self.idx_row_non_storages[row] = -1
+                self.idx_row_non_storages_lower[row] = -1
+                self.idx_row_non_storages_upper[row] = -1
                 continue
-            # First row for this node
-            self.idx_row_non_storages[row] = lp.nrows
+
             ind = np.zeros(len(cols), dtype=np.int)
             val = np.zeros(len(cols), dtype=np.float64)
             for n, c in enumerate(cols):
                 ind[n] = c
                 val[n] = 1
 
-            lp.add_row(ind, val, DBL_MAX)
+            if not some_node.is_max_flow_unbounded:
+                # Only add upper bound if max_flow is finite
+                lp.add_row(ind, val, DBL_MAX)
+                self.idx_row_non_storages_upper[row] = lp.nrows - 1
+            else:
+                self.idx_row_non_storages_upper[row] = -1
+
             lp.add_row(ind, -val, 0.0)
+            self.idx_row_non_storages_lower[row] = lp.nrows - 1
             # Add constraint for cross-domain routes
             # i.e. those from a demand to a supply
             if some_node in cross_domain_cols:
@@ -138,6 +146,9 @@ class PyCLLPSolver(Solver):
         lp.set_num_problems(len(model.scenarios.combinations))
         self.combinations = np.array([s for s in model.scenarios.combinations])
 
+        # Initialise the interior point solver.
+        lp.init(self._solver)
+
     def solve(self, model):
         lp = self.lp
         timestep = model.timestep
@@ -157,14 +168,17 @@ class PyCLLPSolver(Solver):
 
         # update non-storage properties
         for i, node in enumerate(non_storages):
-            row = self.idx_row_non_storages[i]
-            if row == -1:
-                continue
-            min_flow = inf_to_dbl_max(np.array(node.get_all_min_flow(timestep, combinations)))
-            max_flow = inf_to_dbl_max(np.array(node.get_all_max_flow(timestep, combinations)))
+            row = self.idx_row_non_storages_upper[i]
+            # Only update upper bound if the node has a valid row (i.e. is not unbounded).
+            if row >= 0:
+                max_flow = np.array(node.get_all_max_flow(timestep, combinations))
+                lp.set_bound(row, max_flow)
 
-            lp.set_bound(row, max_flow)
-            lp.set_bound(row+1, -min_flow)
+            # Now update lower bounds
+            row = self.idx_row_non_storages_lower[i]
+            if row >= 0:
+                min_flow = np.array(node.get_all_min_flow(timestep, combinations))
+                lp.set_bound(row, -min_flow)
 
         # update storage node constraint
         for col, storage in enumerate(storages):
@@ -179,13 +193,13 @@ class PyCLLPSolver(Solver):
             lp.set_bound(self.idx_row_storages+col*2, ub)
             lp.set_bound(self.idx_row_storages+col*2+1, -lb)
 
+        print(timestep.datetime)
 
-        # Initialise the interior point solver.
-        lp.init(self._solver)
         # Solve the problem
-        lp.solve(self._solver, verbose=0)
+        lp.solve(self._solver, verbose=2)
         route_flow = self._solver.x
         status = self._solver.status
+        print(route_flow, status)
 
         if np.any(status != 0):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
