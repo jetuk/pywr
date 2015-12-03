@@ -30,7 +30,7 @@ class PyCLLPSolver(Solver):
     def setup(self, model):
         # This is the interior point method to use as provided by pycllp
         # TODO make this user configurable
-        self._solver = solver_registry['cl_dense_primal_normal']()
+        self._solver = solver_registry['dense_primal_normal']()
 
         routes = model.find_all_routes(BaseInput, BaseOutput, valid=(BaseLink, BaseInput, BaseOutput))
         # Find cross-domain routes
@@ -38,7 +38,7 @@ class PyCLLPSolver(Solver):
 
         non_storages = []
         storages = []
-        for some_node in model.nodes():
+        for some_node in sorted(model.nodes(), key=lambda n: n.name):
             if isinstance(some_node, (BaseInput, BaseLink, BaseOutput)):
                 non_storages.append(some_node)
             elif isinstance(some_node, Storage):
@@ -147,7 +147,7 @@ class PyCLLPSolver(Solver):
         self.combinations = np.array([s for s in model.scenarios.combinations])
 
         # Initialise the interior point solver.
-        lp.init(self._solver)
+        lp.init(self._solver, verbose=2)
 
     def solve(self, model):
         lp = self.lp
@@ -199,7 +199,7 @@ class PyCLLPSolver(Solver):
         lp.solve(self._solver, verbose=2)
         route_flow = self._solver.x
         status = self._solver.status
-        print(route_flow, status)
+        print(status)
 
         if np.any(status != 0):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
