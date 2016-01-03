@@ -159,10 +159,12 @@ def test_control_curve(solver):
     catchment.connect(lnk)
     demand = pywr.core.Output(model, name="Demand", cost=-10.0, max_flow=10)
     lnk.connect(demand)
+
     from pywr.parameters import ConstantParameter
-    control_curve = ConstantParameter(0.8)
+    control_curve = ConstantParameter(0.7)
     reservoir = river.Reservoir(model, name="Reservoir", max_volume=10, cost=-20, above_curve_cost=0.0,
                                 control_curve=control_curve, initial_volume=10)
+
     reservoir.inputs[0].max_flow = 2.0
     reservoir.outputs[0].max_flow = 2.0
     lnk.connect(reservoir)
@@ -172,6 +174,7 @@ def test_control_curve(solver):
     # Reservoir is currently above control curve. 2 should be taken from the
     # reservoir
     assert_allclose(reservoir.volume, 8)
+
     assert_allclose(demand.flow, 10)
     # Reservoir is still at (therefore above) control curve. So 2 is still taken
     model.step()
