@@ -1,5 +1,5 @@
 from . import Solver
-from pycllp.lp import StandardLP
+from pycllp.lp import EqualityLP
 from pycllp.solvers import solver_registry
 from pywr.core import BaseInput, BaseOutput, BaseLink
 from pywr._core import *
@@ -48,9 +48,10 @@ class PyCLLPSolver(Solver):
         assert(non_storages)
 
         # Create new blank problem
-        self.lp = lp = StandardLP()
+        self.lp = lp = EqualityLP()
         # first column id for routes
         self.idx_col_routes = 0
+        self.idx_col_slacks = self.idx_col_routes + len(routes)
 
         # create a lookup for the cross-domain routes.
         cross_domain_cols = {}
@@ -71,6 +72,7 @@ class PyCLLPSolver(Solver):
         self.idx_row_non_storages_upper = np.empty(len(non_storages), dtype=np.int)
         self.idx_row_non_storages_lower = np.empty(len(non_storages), dtype=np.int)
         cross_domain_col = 0
+        slack_col = 0
         for row, some_node in enumerate(non_storages):
             # Differentiate betwen the node type.
             # Input & Output only apply their flow constraints when they
@@ -89,19 +91,27 @@ class PyCLLPSolver(Solver):
                 self.idx_row_non_storages_upper[row] = -1
                 continue
 
-            ind = np.zeros(len(cols), dtype=np.int)
-            val = np.zeros(len(cols), dtype=np.float64)
+            ind = np.zeros(len(cols)+1, dtype=np.int)
+            val = np.zeros(len(cols)+1, dtype=np.float64)
             for n, c in enumerate(cols):
                 ind[n] = c
                 val[n] = 1
 
             if not some_node.is_max_flow_unbounded:
+                # Add slack variable
+                ind[-1] = self.idx_col_slacks + slack_col
+                val[-1] = 1.0
+                slack_col += 1
                 # Only add upper bound if max_flow is finite
                 lp.add_row(ind, val, DBL_MAX)
                 self.idx_row_non_storages_upper[row] = lp.nrows - 1
             else:
                 self.idx_row_non_storages_upper[row] = -1
 
+            # Add slack variable
+            ind[-1] = self.idx_col_slacks + slack_col
+            val[-1] = -1.0
+            slack_col += 1
             lp.add_row(ind, -val, 0.0)
             self.idx_row_non_storages_lower[row] = lp.nrows - 1
             # Add constraint for cross-domain routes
@@ -116,8 +126,8 @@ class PyCLLPSolver(Solver):
                 for n, (c, v) in enumerate(col_vals):
                     ind[n+len(cols)] = c
                     val[n+len(cols)] = 1./v
+                # Equality LP only needs one row for this constraint
                 lp.add_row(ind, val, 0.0)
-                lp.add_row(ind, -val, 0.0)
                 cross_domain_col += 1
 
         # storage
@@ -126,8 +136,8 @@ class PyCLLPSolver(Solver):
         for col, storage in enumerate(storages):
             cols_output = [n for n, route in enumerate(routes) if route[-1] in storage.outputs]
             cols_input = [n for n, route in enumerate(routes) if route[0] in storage.inputs]
-            ind = np.zeros(len(cols_output)+len(cols_input), dtype=np.int)
-            val = np.zeros(len(cols_output)+len(cols_input), dtype=np.float64)
+            ind = np.zeros(len(cols_output)+len(cols_input)+1, dtype=np.int)
+            val = np.zeros(len(cols_output)+len(cols_input)+1, dtype=np.float64)
             for n, c in enumerate(cols_output):
                 ind[n] = self.idx_col_routes+c
                 val[n] = 1
@@ -135,7 +145,15 @@ class PyCLLPSolver(Solver):
                 ind[len(cols_output)+n] = self.idx_col_routes+c
                 val[len(cols_output)+n] = -1
             # Two rows needed again for the range constraint on change in storage volume
+            # Add slack variable
+            ind[-1] = self.idx_col_slacks + slack_col
+            val[-1] = 1.0
+            slack_col += 1
             lp.add_row(ind, val, 0.0)
+            # Add slack variable
+            ind[-1] = self.idx_col_slacks + slack_col
+            val[-1] = -1.0
+            slack_col += 1
             lp.add_row(ind, -val, 0.0)
 
         self.routes = routes
@@ -193,20 +211,13 @@ class PyCLLPSolver(Solver):
             lp.set_bound(self.idx_row_storages+col*2, ub)
             lp.set_bound(self.idx_row_storages+col*2+1, -lb)
 
-        print(timestep.datetime)
-
         # Solve the problem
         lp.solve(self._solver, verbose=2)
         route_flow = self._solver.x
         status = self._solver.status
-        print(status)
 
         if np.any(status != 0):
             raise RuntimeError("Solver did find an optimal solution for at least one problems.")
-
-        change_in_storage = []
-
-        result = {}
 
         for i, route in enumerate(routes):
             flow = route_flow[:, i]
