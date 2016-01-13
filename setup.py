@@ -46,10 +46,15 @@ if '--with-glpk' in sys.argv:
 if '--with-lpsolve' in sys.argv:
     optional.add('lpsolve')
     sys.argv.remove('--with-lpsolve')
+if '--with-cllp' in sys.argv:
+    optional.add('cllp')
+    sys.argv.remove('--with-cllp')
+
 if not optional:
     # default is to attempt to build everything
     optional.add('glpk')
     optional.add('lpsolve')
+    optional.add('cllp')
 
 compiler_directives = {}
 if '--enable-profiling' in sys.argv:
@@ -94,6 +99,12 @@ if 'lpsolve' in optional:
                   libraries=['lpsolve55'],
                   define_macros=define_macros),
     )
+if 'cllp' in optional:
+    extensions_optional.append(
+        Extension('pywr.solvers.cython_cllp', ['pywr/solvers/cython_cllp.pyx'],
+                  include_dirs=[np.get_include()],),
+    )
+
 
 setup_kwargs['package_data'] = {
     'pywr.notebook': ['*.js', '*.css']

@@ -19,7 +19,7 @@ class Solver(object):
     def solve(self, model, timestep):
         raise NotImplementedError('Solver should be subclassed to provide solve()')
 
-from .cllp import PyCLLPSolver
+from .cython_cllp import PyCLLPSolver
 
 # Attempt to import solvers. These will only be successful if they are built correctly.
 try:
