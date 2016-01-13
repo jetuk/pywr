@@ -30,7 +30,7 @@ class PyCLLPSolver(Solver):
     def setup(self, model):
         # This is the interior point method to use as provided by pycllp
         # TODO make this user configurable
-        self._solver = solver_registry['dense_primal_normal']()
+        self._solver = solver_registry['cl_sparse_primal_normal']()
 
         routes = model.find_all_routes(BaseInput, BaseOutput, valid=(BaseLink, BaseInput, BaseOutput))
         # Find cross-domain routes
@@ -114,21 +114,6 @@ class PyCLLPSolver(Solver):
             slack_col += 1
             lp.add_row(ind, -val, 0.0)
             self.idx_row_non_storages_lower[row] = lp.nrows - 1
-            # Add constraint for cross-domain routes
-            # i.e. those from a demand to a supply
-            if some_node in cross_domain_cols:
-                col_vals = cross_domain_cols[some_node]
-                ind = np.zeros(len(col_vals)+len(cols), dtype=np.int)
-                val = np.zeros(len(col_vals)+len(cols), dtype=np.float64)
-                for n, c in enumerate(cols):
-                    ind[n] = c
-                    val[n] = -1
-                for n, (c, v) in enumerate(col_vals):
-                    ind[n+len(cols)] = c
-                    val[n+len(cols)] = 1./v
-                # Equality LP only needs one row for this constraint
-                lp.add_row(ind, val, 0.0)
-                cross_domain_col += 1
 
         # storage
         if len(storages):
@@ -156,6 +141,42 @@ class PyCLLPSolver(Solver):
             slack_col += 1
             lp.add_row(ind, -val, 0.0)
 
+
+        # This work could be moved in to the loop above (as in the other solvers), however by
+        # adding these mass balance constraints last the system matrix contains all the equality straights first.
+        # This gives a nice structure, when including the slack variables, to the matrix. It looks like,
+        #    [[A1 I],
+        #     [A2 0]]
+        for row, some_node in enumerate(non_storages):
+            # Differentiate betwen the node type.
+            # Input & Output only apply their flow constraints when they
+            # are the first and last node on the route respectively.
+            if isinstance(some_node, BaseInput):
+                cols = [n for n, route in enumerate(routes) if route[0] is some_node]
+            elif isinstance(some_node, BaseOutput):
+                cols = [n for n, route in enumerate(routes) if route[-1] is some_node]
+            else:
+                # Other nodes apply their flow constraints to all routes passing through them
+                cols = [n for n, route in enumerate(routes) if some_node in route]
+
+            if len(cols) == 0:
+                continue
+            # Add constraint for cross-domain routes
+            # i.e. those from a demand to a supply
+            if some_node in cross_domain_cols:
+                col_vals = cross_domain_cols[some_node]
+                ind = np.zeros(len(col_vals)+len(cols), dtype=np.int)
+                val = np.zeros(len(col_vals)+len(cols), dtype=np.float64)
+                for n, c in enumerate(cols):
+                    ind[n] = c
+                    val[n] = -1
+                for n, (c, v) in enumerate(col_vals):
+                    ind[n+len(cols)] = c
+                    val[n+len(cols)] = 1./v
+                # Equality LP only needs one row for this constraint
+                lp.add_row(ind, val, 0.0)
+                cross_domain_col += 1
+
         self.routes = routes
         self.non_storages = non_storages
         self.storages = storages
@@ -165,7 +186,7 @@ class PyCLLPSolver(Solver):
         self.combinations = np.array([s for s in model.scenarios.combinations])
 
         # Initialise the interior point solver.
-        lp.init(self._solver, verbose=2)
+        lp.init(self._solver, verbose=0)
 
     def solve(self, model):
         lp = self.lp
@@ -211,8 +232,9 @@ class PyCLLPSolver(Solver):
             lp.set_bound(self.idx_row_storages+col*2, ub)
             lp.set_bound(self.idx_row_storages+col*2+1, -lb)
 
+        print(timestep.datetime)
         # Solve the problem
-        lp.solve(self._solver, verbose=2)
+        lp.solve(self._solver, verbose=0)
         route_flow = self._solver.x
         status = self._solver.status
 
