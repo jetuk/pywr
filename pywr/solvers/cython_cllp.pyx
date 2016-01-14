@@ -239,8 +239,12 @@ cdef class PyCLLPSolver:
         storages = self.storages
         combinations = self.combinations
 
+        # Preallocate all working arrays
+        # TODO move this to setup()?
         vals = np.empty(combinations.shape[0])
         cost = np.empty(combinations.shape[0])
+        max_volume = np.empty(combinations.shape[0])
+        avail_volume = np.empty(combinations.shape[0])
         # update route properties
         for col, route in enumerate(routes):
             route[0].get_all_cost(timestep, combinations, cost)
@@ -260,22 +264,22 @@ cdef class PyCLLPSolver:
             row = self.idx_row_non_storages_upper[i]
             # Only update upper bound if the node has a valid row (i.e. is not unbounded).
             if row >= 0:
-                max_flow = np.array(node.get_all_max_flow(timestep, combinations))
-                lp.set_bound(row, max_flow)
+                node.get_all_max_flow(timestep, combinations, vals)
+                lp.set_bound(row, vals)
 
             # Now update lower bounds
             row = self.idx_row_non_storages_lower[i]
             if row >= 0:
-                min_flow = node.get_all_min_flow(timestep, combinations)
+                node.get_all_min_flow(timestep, combinations, vals)
                 for i in range(combinations.shape[0]):
-                    min_flow[i] *= -1.0
-                lp.set_bound(row, min_flow)
+                    vals[i] *= -1.0
+                lp.set_bound(row, vals)
 
         # update storage node constraint
         for col, storage in enumerate(storages):
             volume = np.array(storage._volume)
-            max_volume = storage.get_all_max_volume(timestep, combinations)
-            avail_volume = storage.get_all_min_volume(timestep, combinations)
+            storage.get_all_max_volume(timestep, combinations, max_volume)
+            storage.get_all_min_volume(timestep, combinations, avail_volume)
 
             # change in storage cannot be more than the current volume or
             # result in maximum volume being exceeded

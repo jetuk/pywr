@@ -396,12 +396,16 @@ cdef class Node(AbstractNode):
             return self._min_flow
         return self._min_flow_param.value(ts, scenario_index)
 
-    cpdef double[:] get_all_min_flow(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_min_flow(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the minimum flow at a given timestep for all scenario combinations
         """
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
         if self._min_flow_param is None:
-            return np.ones(combinations.shape[0])*self._min_flow
-        return self._min_flow_param.all_values(ts, combinations)
+            out[:] = self._min_flow
+            return out
+        return self._min_flow_param.all_values(ts, combinations, out)
 
     property max_flow:
         """The maximum flow constraint on the node
@@ -440,12 +444,16 @@ cdef class Node(AbstractNode):
             return self._max_flow
         return self._max_flow_param.value(ts, scenario_index)
 
-    cpdef double[:] get_all_max_flow(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_max_flow(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the maximum flow at a given timestep for all scenario combinations
         """
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
         if self._max_flow_param is None:
-            return np.ones(combinations.shape[0])*self._max_flow
-        return self._max_flow_param.all_values(ts, combinations)
+            out[:] = self._max_flow
+            return out
+        return self._max_flow_param.all_values(ts, combinations, out)
 
     property conversion_factor:
         """The conversion between inflow and outflow for the node
@@ -582,7 +590,6 @@ cdef class AggregatedNode(AbstractNode):
         AbstractNode.after(self, ts)
         cdef int i
         cdef Node n
-
         for i, si in enumerate(self.model.scenarios.combinations):
             self._flow[i] = 0.0
             for n in self._nodes:
@@ -784,12 +791,15 @@ cdef class Storage(AbstractStorage):
             return self._min_volume
         return self._min_volume_param.value(ts, scenario_index)
 
-    cpdef double[:] get_all_min_volume(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_min_volume(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the minimum volume at a given timestep for all scenario combinations
         """
+        if out is None:
+            out = np.empty(combinations.shape[0])
         if self._min_volume_param is None:
-            return np.ones(combinations.shape[0])*self._min_volume
-        return self._min_volume_param.all_values(ts, combinations)
+            out[:] = self._min_volume
+            return out
+        return self._min_volume_param.all_values(ts, combinations, out)
 
     property max_volume:
         def __get__(self):
@@ -827,12 +837,15 @@ cdef class Storage(AbstractStorage):
             return self._level
         return self._level_param.value(ts, scenario_index)
 
-    cpdef double[:] get_all_max_volume(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_max_volume(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the maximum volume at a given timestep for all scenario combinations
         """
+        if out is None:
+            out = np.empty(combinations.shape[0])
         if self._max_volume_param is None:
-            return np.ones(combinations.shape[0])*self._max_volume
-        return self._max_volume_param.all_values(ts, combinations)
+            out[:] = self._max_volume
+            return out
+        return self._max_volume_param.all_values(ts, combinations, out)
 
     property domain:
         def __get__(self):

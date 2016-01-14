@@ -66,9 +66,9 @@ cdef class Node(AbstractNode):
     cdef Parameter _conversion_factor_param
     cpdef double get_cost(self, Timestep ts, ScenarioIndex scenario_index) except? -1
     cpdef double get_min_flow(self, Timestep ts, ScenarioIndex scenario_index) except? -1
-    cpdef double[:] get_all_min_flow(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] get_all_min_flow(self, Timestep ts, int[:, :] combinations, double[:] out=*)
     cpdef double get_max_flow(self, Timestep ts, ScenarioIndex scenario_index) except? -1
-    cpdef double[:] get_all_max_flow(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] get_all_max_flow(self, Timestep ts, int[:, :] combinations, double[:] out=*)
     cpdef double get_conversion_factor(self) except? -1
     cdef set_parameters(self, Timestep ts, ScenarioIndex scenario_index)
 
@@ -77,6 +77,7 @@ cdef class AggregatedNode(AbstractNode):
     cdef double[:] _factors
     cdef double _max_flow
     cdef double _min_flow
+
 
 cdef class BaseInput(Node):
     cdef object _licenses
@@ -93,13 +94,14 @@ cdef class Storage(AbstractStorage):
     cdef double _level
     cdef Parameter _min_volume_param
     cdef Parameter _max_volume_param
+
     cdef Parameter _level_param
     cpdef _reset_storage_only(self)
     cpdef double get_cost(self, Timestep ts, ScenarioIndex scenario_index) except? -1
     cpdef double get_min_volume(self, Timestep ts, ScenarioIndex scenario_index) except? -1
-    cpdef double[:] get_all_min_volume(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] get_all_min_volume(self, Timestep ts, int[:, :] combinations, double[:] out=*)
     cpdef double get_max_volume(self, Timestep ts, ScenarioIndex scenario_index) except? -1
-    cpdef double[:] get_all_max_volume(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] get_all_max_volume(self, Timestep ts, int[:, :] combinations, double[:] out=*)
     cpdef double get_level(self, Timestep ts, ScenarioIndex scenario_index) except? -1
 
 cdef class AggregatedStorage(AbstractStorage):
