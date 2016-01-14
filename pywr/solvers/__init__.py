@@ -19,9 +19,29 @@ class Solver(object):
     def solve(self, model, timestep):
         raise NotImplementedError('Solver should be subclassed to provide solve()')
 
-from .cython_cllp import PyCLLPSolver
-
 # Attempt to import solvers. These will only be successful if they are built correctly.
+try:
+    from .cython_cllp import PyCLLPSolver as cy_PyCLLPSolver
+except ImportError:
+    pass
+else:
+    class PyCLLPSolver(Solver):
+        """Python wrapper of Cython GLPK solver.
+
+        This is required to subclass Solver and get the metaclass magic.
+        """
+        name = 'pycllp'
+
+        def __init__(self, *args, **kwargs):
+            super(PyCLLPSolver, self).__init__(*args, **kwargs)
+            self._cy_solver = cy_PyCLLPSolver()
+
+        def setup(self, model):
+            return self._cy_solver.setup(model)
+
+        def solve(self, model):
+            return self._cy_solver.solve(model)
+
 try:
     from .cython_glpk import CythonGLPKSolver as cy_CythonGLPKSolver
 except ImportError:
