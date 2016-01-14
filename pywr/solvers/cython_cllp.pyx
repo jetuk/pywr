@@ -223,10 +223,13 @@ cdef class PyCLLPSolver:
         cdef double[:] max_flow
         cdef double[:] cost
         cdef double[:] avail_volume
+        cdef double[:] max_volume
+        cdef double[:] volume
         cdef double[:] vals
         cdef int i, col
         cdef double[:] lb
         cdef double[:] ub
+        cdef double[:, :] route_flow
         cdef Timestep timestep
         cdef int[:] status
         cdef int[:, :] combinations
@@ -277,7 +280,7 @@ cdef class PyCLLPSolver:
 
         # update storage node constraint
         for col, storage in enumerate(storages):
-            volume = np.array(storage._volume)
+            volume = storage._volume
             storage.get_all_max_volume(timestep, combinations, max_volume)
             storage.get_all_min_volume(timestep, combinations, avail_volume)
 
@@ -300,10 +303,10 @@ cdef class PyCLLPSolver:
                 raise RuntimeError("Solver did find an optimal solution for at least one problems.")
 
         for i, route in enumerate(routes):
-            flow = route_flow[:, i]
+            vals = route_flow[:, i]
             # TODO make this cleaner.
-            route[0].commit_all(flow)
-            route[-1].commit_all(flow)
+            route[0].commit_all(vals)
+            route[-1].commit_all(vals)
             for node in route[1:-1]:
                 if isinstance(node, BaseLink):
-                    node.commit_all(flow)
+                    node.commit_all(vals)
