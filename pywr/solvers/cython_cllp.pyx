@@ -239,15 +239,17 @@ cdef class PyCLLPSolver:
         storages = self.storages
         combinations = self.combinations
 
+        vals = np.empty(combinations.shape[0])
+        cost = np.empty(combinations.shape[0])
         # update route properties
         for col, route in enumerate(routes):
-            cost = route[0].get_all_cost(timestep, combinations)
+            route[0].get_all_cost(timestep, combinations, cost)
             for node in route[1:-1]:
                 if isinstance(node, BaseLink):
-                    vals = node.get_all_cost(timestep, combinations)
+                    node.get_all_cost(timestep, combinations, vals)
                     for i in range(combinations.shape[0]):
                         cost[i] += vals[i]
-            vals = route[-1].get_all_cost(timestep, combinations)
+            route[-1].get_all_cost(timestep, combinations, vals)
             for i in range(combinations.shape[0]):
                 cost[i] += vals[i]
                 cost[i] *= -1.0

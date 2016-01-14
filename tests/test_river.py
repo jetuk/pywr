@@ -9,11 +9,6 @@ import pywr.core
 from pywr.core import Model, Input, Output, Catchment
 from pywr.parameters import MonthlyProfileParameter
 from pywr.domains import river
-<<<<<<< master
-=======
-import datetime
-import numpy as np
->>>>>>> HEAD~14
 from numpy.testing import assert_allclose
 import pytest
 

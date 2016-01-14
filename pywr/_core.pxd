@@ -44,7 +44,7 @@ cdef class AbstractNode:
     cdef public basestring comment
 
     cdef Parameter _cost_param
-    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=*)
 
     cpdef setup(self, model)
     cpdef reset(self)

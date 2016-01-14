@@ -81,13 +81,15 @@ cdef class Parameter:
     cpdef double value(self, Timestep ts, ScenarioIndex scenario_index) except? -1:
         return 0
 
-    cpdef double[:] all_values(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] all_values(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         cdef int i
         cdef int n = combinations.shape[0]
-        values = np.zeros(n)
+        if out is None:
+            out = np.empty(n)
+
         for i in range(n):
-            values[i] = self.value(ts, combinations[i, :])
-        return values
+            out[i] = self.value(ts, combinations[i, :])
+        return out
 
     cpdef after(self, Timestep ts):
         cdef Parameter child

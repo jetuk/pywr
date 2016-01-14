@@ -93,8 +93,12 @@ class Reservoir(RiverDomainMixin, Storage):
             kwargs['cost'] = cost
         super(Reservoir, self).__init__(*args, **kwargs)
 
-    def get_all_cost(self, ts, combinations):
-        return np.array([self.get_cost(ts, combinations[i, :]) for i in range(combinations.shape[0])])
+    def get_all_cost(self, ts, combinations, out=None):
+        if out is None:
+            out = np.empty(combinations.shape[0])
+        for i in range(combinations.shape[0]):
+            out[i] = self.get_cost(ts, combinations[i, :])
+        return out
 
 
 class River(RiverDomainMixin, Link):

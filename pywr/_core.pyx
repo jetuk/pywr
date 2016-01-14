@@ -204,12 +204,16 @@ cdef class AbstractNode:
         def __set__(self, value):
             self._allow_isolated = value
 
-    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the cost at a given timestep for all scenario combinations
         """
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
         if self._cost_param is None:
-            return np.ones(combinations.shape[0])*self._cost
-        return self._cost_param.all_values(ts, combinations)
+            out[:] = self._cost
+            return out
+        return self._cost_param.all_values(ts, combinations, out)
 
     property name:
         """ Name of the node. """
@@ -651,10 +655,17 @@ cdef class StorageInput(BaseInput):
         # Return negative of parent cost
         return -self.parent.get_cost(ts, scenario_index)
 
-    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the cost at a given timestep for all scenario combinations
         """
-        return -np.array(self.parent.get_all_cost(ts, combinations))
+        cdef int i
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
+        self.parent.get_all_cost(ts, combinations, out)
+        for i in range(combinations.shape[0]):
+            out[i] *= -1.0
+        return out
 
 cdef class StorageOutput(BaseOutput):
     cpdef commit(self, int scenario_index, double volume):
@@ -672,10 +683,14 @@ cdef class StorageOutput(BaseOutput):
         # Return parent cost
         return self.parent.get_cost(ts, scenario_index)
 
-    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations):
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
         """Get the cost at a given timestep for all scenario combinations
         """
-        return self.parent.get_all_cost(ts, combinations)
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
+        self.parent.get_all_cost(ts, combinations, out)
+        return out
 
 cdef class AbstractStorage(AbstractNode):
 

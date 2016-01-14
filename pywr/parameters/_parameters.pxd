@@ -18,7 +18,7 @@ cdef class Parameter:
     cpdef reset(self)
     cpdef before(self, Timestep ts)
     cpdef double value(self, Timestep ts, ScenarioIndex scenario_index) except? -1
-    cpdef double[:] all_values(self, Timestep ts, int[:, :] combinations)
+    cpdef double[:] all_values(self, Timestep ts, int[:, :] combinations, double[:] out=*)
     cpdef after(self, Timestep ts)
     cpdef finish(self)
     cpdef update(self, double[:] values)
