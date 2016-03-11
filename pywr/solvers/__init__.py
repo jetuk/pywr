@@ -33,8 +33,8 @@ else:
         name = 'pycllp'
 
         def __init__(self, *args, **kwargs):
-            super(PyCLLPSolver, self).__init__(*args, **kwargs)
-            self._cy_solver = cy_PyCLLPSolver()
+            self._cy_solver = cy_PyCLLPSolver(*args, **kwargs)
+            super(PyCLLPSolver, self).__init__()
 
         def setup(self, model):
             return self._cy_solver.setup(model)

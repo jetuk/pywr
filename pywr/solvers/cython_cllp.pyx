@@ -29,6 +29,7 @@ cdef class PyCLLPSolver:
     cdef int[:] idx_row_non_storages_lower
     cdef int[:, :] combinations
     cdef int idx_row_storages
+    cdef object _solver_name
     cdef object _solver
     cdef object lp
     cdef object routes
@@ -37,8 +38,8 @@ cdef class PyCLLPSolver:
 
 
     def __init__(self, *args, **kwargs):
+        self._solver_name = kwargs.pop('solver', 'cl_sparse_primal_normal')
         super(PyCLLPSolver, self).__init__(*args, **kwargs)
-        # TODO add pycllp specific settings
 
     def setup(self, model):
         cdef Node supply
@@ -58,8 +59,7 @@ cdef class PyCLLPSolver:
         cdef cross_domain_row
 
         # This is the interior point method to use as provided by pycllp
-        # TODO make this user configurable
-        self._solver = solver_registry['cl_sparse_primal_normal']()
+        self._solver = solver_registry[self._solver_name]()
 
         routes = model.find_all_routes(BaseInput, BaseOutput, valid=(BaseLink, BaseInput, BaseOutput))
         # Find cross-domain routes
@@ -67,7 +67,7 @@ cdef class PyCLLPSolver:
 
         non_storages = []
         storages = []
-        for some_node in sorted(model.nodes(), key=lambda n: n.name):
+        for some_node in sorted(model.graph.nodes(), key=lambda x: x.name):
             if isinstance(some_node, (BaseInput, BaseLink, BaseOutput)):
                 non_storages.append(some_node)
             elif isinstance(some_node, Storage):
