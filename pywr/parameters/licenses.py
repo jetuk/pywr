@@ -169,7 +169,7 @@ class AnnualHyperbolaLicense(AnnualLicense):
     Where :math:`x` is the ratio of actual daily averaged remaining license (as calculated by AnnualLicense) to the
     expected daily averaged remaining licence. I.e. if the license is on track the ratio is 1.0.
     """
-    def __init__(self, node, amount, value):
+    def __init__(self, amount, value, max_value=inf):
         """
 
         Parameters
@@ -181,12 +181,13 @@ class AnnualHyperbolaLicense(AnnualLicense):
         """
         super(AnnualHyperbolaLicense, self).__init__(node, amount)
         self._value = value
+        self.max_value = max_value
 
     def value(self, timestep, scenario_index):
         remaining = super(AnnualHyperbolaLicense, self).value(timestep, scenario_index)
         expected = self._amount / (365 + int(calendar.isleap(timestep.datetime.year)))
         x = remaining / expected
         try:
-            return self._value / x
+            return min(self.max_value, self._value / x)
         except ZeroDivisionError:
-            return inf
+            return self.max_value
