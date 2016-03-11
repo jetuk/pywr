@@ -234,6 +234,14 @@ class TablesRecorder(Recorder):
         if self.time is not None:
             self._time_table = self.h5store.file.get_node(self.time)
 
+        # Ignore warnings about natural naming
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for node in nodes:
+                self._arrays[node] = tables.CArray(self.parent, node.name, atom, shape)
+
+
     def save(self):
         """
         Save data to the tables
