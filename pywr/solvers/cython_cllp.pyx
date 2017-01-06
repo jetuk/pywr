@@ -38,7 +38,7 @@ cdef class PyCLLPSolver:
 
 
     def __init__(self, *args, **kwargs):
-        self._solver_name = kwargs.pop('solver', 'cl_sparse_primal_normal')
+        self._solver_name = kwargs.pop('solver', 'dense_primal_normal')
         super(PyCLLPSolver, self).__init__(*args, **kwargs)
 
     def setup(self, model):
@@ -57,6 +57,7 @@ cdef class PyCLLPSolver:
         cdef Timestep timestep
         cdef int status
         cdef cross_domain_row
+        cdef ScenarioIndex s
 
         # This is the interior point method to use as provided by pycllp
         self._solver = solver_registry[self._solver_name]()
@@ -212,7 +213,7 @@ cdef class PyCLLPSolver:
 
         # Now expand the constraints and objective function to multiple
         lp.set_num_problems(len(model.scenarios.combinations))
-        self.combinations = np.array([s for s in model.scenarios.combinations])
+        self.combinations = np.array([s.indices for s in model.scenarios.combinations])
 
         # Initialise the interior point solver.
         lp.init(self._solver, verbose=0)
@@ -294,7 +295,7 @@ cdef class PyCLLPSolver:
             lp.set_bound(self.idx_row_storages+col*2+1, avail_volume)
 
         # Solve the problem
-        lp.solve(self._solver, verbose=0)
+        lp.solve(self._solver, verbose=1)
         route_flow = self._solver.x
         status = self._solver.status
 

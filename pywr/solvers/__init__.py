@@ -41,6 +41,7 @@ else:
 
         def solve(self, model):
             return self._cy_solver.solve(model)
+    solver_registry.append(PyCLLPSolver)
 
 try:
     from .cython_glpk import CythonGLPKSolver as cy_CythonGLPKSolver

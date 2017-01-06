@@ -88,7 +88,7 @@ cdef class Parameter:
             out = np.empty(n)
 
         for i in range(n):
-            out[i] = self.value(ts, combinations[i, :])
+            out[i] = self.value(ts, ScenarioIndex(i, combinations[i, :]))
         return out
 
     cpdef after(self, Timestep ts):
