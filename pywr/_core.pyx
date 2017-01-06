@@ -204,17 +204,6 @@ cdef class AbstractNode:
         def __set__(self, value):
             self._allow_isolated = value
 
-    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
-        """Get the cost at a given timestep for all scenario combinations
-        """
-        if out is None:
-            out = np.empty(combinations.shape[0])
-
-        if self._cost_param is None:
-            out[:] = self._cost
-            return out
-        return self._cost_param.all_values(ts, combinations, out)
-
     property name:
         """ Name of the node. """
         def __get__(self):
@@ -363,6 +352,17 @@ cdef class Node(AbstractNode):
             else:
                 self._cost_param = None
                 self._cost = value
+
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
+        """Get the cost at a given timestep for all scenario combinations
+        """
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
+        if self._cost_param is None:
+            out[:] = self._cost
+            return out
+        return self._cost_param.all_values(ts, combinations, out)
 
     cpdef double get_cost(self, Timestep ts, ScenarioIndex scenario_index) except? -1:
         """Get the cost per unit flow at a given timestep
@@ -765,6 +765,17 @@ cdef class Storage(AbstractStorage):
         if self._cost_param is None:
             return self._cost
         return self._cost_param.value(ts, scenario_index)
+
+    cpdef double[:] get_all_cost(self, Timestep ts, int[:, :] combinations, double[:] out=None):
+        """Get the cost at a given timestep for all scenario combinations
+        """
+        if out is None:
+            out = np.empty(combinations.shape[0])
+
+        if self._cost_param is None:
+            out[:] = self._cost
+            return out
+        return self._cost_param.all_values(ts, combinations, out)
 
     property initial_volume:
         def __get__(self, ):
