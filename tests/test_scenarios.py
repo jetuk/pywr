@@ -126,9 +126,9 @@ def test_scenario_storage(solver):
     """
     model = Model(solver=solver)
 
-    i = Input(model, 'input', max_flow=999)
+    i = Input(model, 'input', max_flow=999, cost=1)
     s = Storage(model, 'storage', num_inputs=1, num_outputs=1, max_volume=1000, initial_volume=500)
-    o = Output(model, 'output', max_flow=999)
+    o = Output(model, 'output', max_flow=999, cost=1)
 
     scenario_input = Scenario(model, 'Inflow', size=2)
     i.min_flow = ConstantScenarioParameter(scenario_input, [5.0, 10.0])
